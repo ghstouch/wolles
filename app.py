@@ -5,9 +5,6 @@ from groq import Groq
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
-from fastapi import FastAPI
-import uvicorn
-import threading
 
 # ========== CONFIG ==========
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -114,28 +111,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ========== FASTAPI ==========
-
-fastapi_app = FastAPI()
-
-@fastapi_app.get("/")
-def root():
-    active = [k for k, v in PROVIDERS.items() if v["enabled"] and v["api_key"]]
-    return {"status": "running", "active_providers": active}
-
 # ========== MAIN ==========
 
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    print("[INFO] Bot started polling...")
     app.run_polling()
 
-# Jalanin bot di thread terpisah dengan event loop sendiri
-thread = threading.Thread(target=run_bot, daemon=True)
-thread.start()
-
 if __name__ == "__main__":
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=7860)
+    main()
