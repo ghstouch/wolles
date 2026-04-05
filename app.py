@@ -1,5 +1,4 @@
 import os
-import asyncio
 import requests
 from groq import Groq
 from openai import OpenAI
@@ -103,10 +102,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
     user_message = update.message.text
+
     thinking_msg = await update.message.reply_text("⏳ Thinking...")
+
     reply, provider_used = get_ai_response(user_message)
-    await thinking_msg.edit_text(
+
+    await thinking_msg.delete()
+    await update.message.reply_text(
         f"{reply}\n\n_via {provider_used}_",
         parse_mode="Markdown"
     )
