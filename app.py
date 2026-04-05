@@ -1,5 +1,5 @@
 import os
-import threading
+import asyncio
 import requests
 from groq import Groq
 from openai import OpenAI
@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from fastapi import FastAPI
 import uvicorn
+import threading
 
 # ========== CONFIG ==========
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -19,12 +20,12 @@ PROVIDERS = {
     },
     "openrouter": {
         "api_key": os.environ.get("OPENROUTER_API_KEY"),
-        "model": "mistralai/mistral-7b-instruct",  # gratis di openrouter
+        "model": "mistralai/mistral-7b-instruct",
         "enabled": True
     },
     "huggingface": {
         "api_key": os.environ.get("HF_API_KEY"),
-        "model": "mistralai/Mistral-7B-Instruct-v0.3",  # gratis di HF
+        "model": "mistralai/Mistral-7B-Instruct-v0.3",
         "enabled": True
     }
 }
@@ -45,10 +46,7 @@ def call_groq(message, api_key, model):
     return response.choices[0].message.content
 
 def call_openrouter(message, api_key, model):
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key
-    )
+    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -79,28 +77,20 @@ CALLER_MAP = {
     "huggingface": call_huggingface
 }
 
-# ========== SMART FALLBACK ==========
-
 def get_ai_response(message):
-    """Coba provider satu per satu, fallback otomatis kalau gagal"""
     errors = []
-    
     for provider_name, config in PROVIDERS.items():
         if not config["enabled"] or not config["api_key"]:
             continue
-        
         try:
-            print(f"[INFO] Trying provider: {provider_name}")
-            caller = CALLER_MAP[provider_name]
-            reply = caller(message, config["api_key"], config["model"])
-            print(f"[INFO] Success with: {provider_name}")
+            print(f"[INFO] Trying: {provider_name}")
+            reply = CALLER_MAP[provider_name](message, config["api_key"], config["model"])
+            print(f"[INFO] Success: {provider_name}")
             return reply, provider_name
         except Exception as e:
             print(f"[WARN] {provider_name} failed: {str(e)}")
             errors.append(f"{provider_name}: {str(e)}")
-            continue
-    
-    return f"❌ Semua provider gagal:\n" + "\n".join(errors), "none"
+    return "❌ Semua provider gagal:\n" + "\n".join(errors), "none"
 
 # ========== TELEGRAM HANDLERS ==========
 
@@ -118,16 +108,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     thinking_msg = await update.message.reply_text("⏳ Thinking...")
-    
     reply, provider_used = get_ai_response(user_message)
-    
-    # Edit pesan thinking jadi jawaban
     await thinking_msg.edit_text(
         f"{reply}\n\n_via {provider_used}_",
         parse_mode="Markdown"
     )
 
-# ========== FASTAPI & MAIN ==========
+# ========== FASTAPI ==========
 
 fastapi_app = FastAPI()
 
@@ -136,12 +123,17 @@ def root():
     active = [k for k, v in PROVIDERS.items() if v["enabled"] and v["api_key"]]
     return {"status": "running", "active_providers": active}
 
+# ========== MAIN ==========
+
 def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
 
+# Jalanin bot di thread terpisah dengan event loop sendiri
 thread = threading.Thread(target=run_bot, daemon=True)
 thread.start()
 
